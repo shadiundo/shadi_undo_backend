@@ -38,15 +38,25 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
   "https://shaadi-undo.vercel.app",
+  "https://shadi-undo-frontend.vercel.app",
   "https://shaadi-undo-kyc5k230h-arman-maliks-projects-7ea1add6.vercel.app",
   "https://shaadiundo.daily.co"
 ];
 
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (origin.endsWith(".vercel.app")) return true;
+  if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  return false;
+}
+
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (isOriginAllowed(origin)) {
+        return callback(null, true);
+      }
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
@@ -75,7 +85,10 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: function (origin, callback) {
+      if (isOriginAllowed(origin)) return callback(null, true);
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   },
 });
@@ -107,8 +120,9 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(5000, "0.0.0.0", () => {
-  console.log("🚀 Server running on port 5000");
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
 
