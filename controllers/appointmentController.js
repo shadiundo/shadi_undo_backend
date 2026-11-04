@@ -652,7 +652,9 @@ export async function startRealTimeSession(req, res) {
       roomName,
       videoRoom: roomName,
       startedAt: appointment.session?.startedAt || now,
-      expiresAt: new Date(Date.now() + minutes * 60 * 1000),
+      expiresAt: (appointment.session?.expiresAt && new Date(appointment.session.expiresAt) > now)
+        ? appointment.session.expiresAt
+        : new Date(Date.now() + minutes * 60 * 1000),
       minEndTime: appointment.session?.minEndTime || new Date(Date.now() + 30 * 60 * 1000),
       status: "ongoing",
       participants: appointment.session?.participants || {

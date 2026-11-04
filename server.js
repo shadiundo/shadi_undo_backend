@@ -111,25 +111,51 @@ io.on("connection", (socket) => {
   socket.on("join-session", ({ appointmentId, role }) => {
     socket.join(`appointment:${appointmentId}`);
     socket.data.role = role;
+    socket.data.appointmentId = appointmentId;
     console.log(`📌 ${role} joined appointment:${appointmentId}`);
   });
 
   socket.on("user-joined", ({ appointmentId, user }) => {
     socket.to(`appointment:${appointmentId}`).emit("notify", {
       type: "USER_JOINED",
-      message: `${user.name} joined the session`,
+      message: `${user?.name || "User"} joined the session`,
     });
+    socket.to(`appointment:${appointmentId}`).emit("user-joined", { appointmentId, user });
   });
 
   socket.on("user-left", ({ appointmentId, user }) => {
     socket.to(`appointment:${appointmentId}`).emit("notify", {
       type: "USER_LEFT",
-      message: `${user.name} left the session`,
+      message: `${user?.name || "User"} left the session`,
+    });
+    socket.to(`appointment:${appointmentId}`).emit("user-left", { appointmentId, user });
+  });
+
+  socket.on("professional-left", ({ appointmentId }) => {
+    console.log(`⚠️ Professional left appointment:${appointmentId}`);
+    socket.to(`appointment:${appointmentId}`).emit("professional-left", { appointmentId });
+    socket.to(`appointment:${appointmentId}`).emit("notify", {
+      type: "PROFESSIONAL_LEFT",
+      message: "Professional has disconnected. Timer is paused.",
+    });
+  });
+
+  socket.on("professional-joined", ({ appointmentId }) => {
+    console.log(`✅ Professional rejoined appointment:${appointmentId}`);
+    socket.to(`appointment:${appointmentId}`).emit("professional-joined", { appointmentId });
+    socket.to(`appointment:${appointmentId}`).emit("notify", {
+      type: "PROFESSIONAL_JOINED",
+      message: "Professional has rejoined the session.",
     });
   });
 
   socket.on("disconnect", () => {
     console.log("❌ Socket disconnected:", socket.id);
+    if (socket.data.role === "professional" && socket.data.appointmentId) {
+      socket.to(`appointment:${socket.data.appointmentId}`).emit("professional-left", {
+        appointmentId: socket.data.appointmentId,
+      });
+    }
   });
 });
 
