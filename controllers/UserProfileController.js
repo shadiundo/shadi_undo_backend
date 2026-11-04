@@ -121,8 +121,16 @@ export const getMyProfile = async (req, res) => {
     const userId = req.user._id || req.user.id;
 
     // fetch profile
-    const profile = await UserProfile.findOne({ user: userId }).populate("user", "name email phone role").lean();
-    if (!profile) return res.status(404).json({ success: false, message: "Profile not found" });
+    let profile = await UserProfile.findOne({ user: userId }).populate("user", "name email phone role").lean();
+    if (!profile) {
+      const created = await UserProfile.create({
+        user: userId,
+        name: req.user?.name || "User",
+        email: req.user?.email || "",
+        phone: req.user?.phone || "",
+      });
+      profile = await UserProfile.findById(created._id).populate("user", "name email phone role").lean();
+    }
 
     // appointments pagination
     const page = Math.max(parseInt(req.query.page || "1", 10), 1);

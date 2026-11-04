@@ -40,14 +40,27 @@ const allowedOrigins = [
   "https://shaadi-undo.vercel.app",
   "https://shadi-undo-frontend.vercel.app",
   "https://shaadi-undo-kyc5k230h-arman-maliks-projects-7ea1add6.vercel.app",
-  "https://shaadiundo.daily.co"
+  "https://shaadiundo.daily.co",
+  "https://shaadiundo.com",
+  "https://www.shaadiundo.com",
+  "https://shadiundo.com",
+  "https://www.shadiundo.com"
 ];
 
 function isOriginAllowed(origin) {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
-  if (origin.endsWith(".vercel.app")) return true;
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname;
+    if (host.endsWith(".vercel.app")) return true;
+    if (host.endsWith("shaadiundo.com") || host.endsWith("shadiundo.com") || host.endsWith("daily.co")) return true;
+  } catch {}
   if (process.env.FRONTEND_URL && origin === process.env.FRONTEND_URL) return true;
+  // Allow local LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x, localhost)
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+    return true;
+  }
   return false;
 }
 

@@ -553,6 +553,11 @@ export const startAppointment = async (req, res) => {
     const expiresAt = new Date(Date.now() + minutes * 60 * 1000);
     const minEndTime = new Date(Date.now() + 30 * 60 * 1000);
 
+    const cleanId = String(appt._id).replace(/[^a-zA-Z0-9-_]/g, "");
+    const roomName = appt.session?.roomName || appt.session?.videoRoom || `session_${cleanId}`;
+
+    appt.session.roomName = roomName;
+    appt.session.videoRoom = roomName;
     appt.session.startedAt = startedAt;
     appt.session.status = "ongoing";
     appt.session.expiresAt = expiresAt;
@@ -560,6 +565,15 @@ export const startAppointment = async (req, res) => {
     appt.session.participants = appt.session.participants || { professionalJoined: false, userJoined: false };
 
     appt.status = "ongoing";
+
+    try {
+      await ensureDailyRoom(roomName, {
+        start_video_off: appt.mode === "audio",
+        enable_screenshare: true,
+      });
+    } catch (dailyErr) {
+      console.warn("ensureDailyRoom in startAppointment:", dailyErr.message);
+    }
 
     await appt.save();
 
@@ -795,10 +809,12 @@ export async function joinSession(req, res) {
         .json({ success: false, message: "Appointment not found" });
     }
 
-    if (!appointment.session || !appointment.session.roomName) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Session not available yet" });
+    const roomName = appointment.session?.roomName || appointment.session?.videoRoom || `session_${String(appointment._id).replace(/[^a-zA-Z0-9-_]/g, "")}`;
+    if (!appointment.session?.roomName) {
+      appointment.session = appointment.session || {};
+      appointment.session.roomName = roomName;
+      appointment.session.videoRoom = roomName;
+      await appointment.save();
     }
 
     const callerId = user && (user._id ?? user.id);
@@ -825,7 +841,7 @@ export async function joinSession(req, res) {
     let token;
     try {
       token = await createMeetingToken({
-        roomName: appointment.session.roomName,
+        roomName,
         userName: user.name || user.email || "Participant",
         ttlSeconds,
         isOwner: isProfessional || isAdmin,
@@ -851,12 +867,13 @@ export async function joinSession(req, res) {
       );
 
       const payload = decoded?.payload || {};
+      const tokenRoom = payload.room || payload.r || payload.properties?.room_name;
 
-      // IMPORTANT: we now validate `room`, not `properties.room_name`
-      if (!payload.room || payload.room !== appointment.session.roomName) {
+      // Validate room if present in token
+      if (tokenRoom && tokenRoom !== roomName) {
         console.error("[joinSession debug] Token room mismatch", {
-          tokenRoom: payload.room,
-          expected: appointment.session.roomName,
+          tokenRoom,
+          expected: roomName,
         });
         return res.status(500).json({
           success: false,
@@ -887,10 +904,10 @@ export async function joinSession(req, res) {
     return res.json({
       success: true,
       data: {
-        roomName: appointment.session.roomName,
+        roomName,
         token,
         ttlSeconds,
-        meetingUrl: `https://${process.env.DAILY_DOMAIN || "shaadiundo.daily.co"}/${appointment.session.roomName}`,
+        meetingUrl: `https://${process.env.DAILY_DOMAIN || "shaadiundo.daily.co"}/${roomName}`,
       },
     });
   } catch (err) {

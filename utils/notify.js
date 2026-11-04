@@ -2,6 +2,10 @@ import { Resend } from "resend";
 import dotenv from "dotenv";
 dotenv.config();
 
+if (process.env.NODE_ENV !== "production") {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 console.log("RESEND FROM =", process.env.EMAIL_FROM);
 console.log("RESEND KEY =", process.env.RESEND_API_KEY?.slice(0, 8));

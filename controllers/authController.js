@@ -21,7 +21,7 @@ const safeUser = (user) => ({
 /* -------------------------- Rate Limiter -------------------------- */
 export const otpRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5,
+  max: process.env.NODE_ENV === "production" ? 10 : 200,
   message: { message: "Too many OTP requests, try again later." },
 });
 
@@ -47,16 +47,26 @@ export const register = async (req, res) => {
 
     const normEmail = email.toLowerCase().trim();
 
-    const existing = await User.findOne({ email: normEmail });
-    if (existing) {
-      return res.status(400).json({ message: "User already exists" });
+    const existingEmail = await User.findOne({ email: normEmail });
+    if (existingEmail) {
+      return res.status(400).json({ message: "This email is already registered. Please switch to Login." });
+    }
+
+    if (phone) {
+      const trimmedPhone = phone.trim();
+      const existingPhone = await User.findOne({ phone: trimmedPhone });
+      if (existingPhone) {
+        return res.status(400).json({
+          message: `Phone number ${trimmedPhone} is already registered. Please switch to Login.`,
+        });
+      }
     }
 
     // Create user WITHOUT OTP fields
     const user = await User.create({
       name,
       email: normEmail,
-      phone,
+      phone: phone ? phone.trim() : undefined,
       role: "user",
     });
 
@@ -64,6 +74,8 @@ export const register = async (req, res) => {
     const otp = generateOtp();
     user.setOtp(otp);
     await user.save({ validateBeforeSave: false });
+
+    console.log(`🔑 [OTP] Generated registration OTP for ${user.email} (${user.phone}): ${otp}`);
 
     const html = otpEmailHtml({
       name: user.name,
@@ -82,10 +94,17 @@ export const register = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "OTP sent to your email",
+      ...(process.env.NODE_ENV !== "production" ? { debugOtp: otp } : {}),
     });
   } catch (err) {
     console.error("Register error:", err);
-    return res.status(500).json({ message: "Server error" });
+    if (err.code === 11000) {
+      const isPhone = err.keyPattern?.phone || err.message?.includes("phone");
+      return res.status(400).json({
+        message: `${isPhone ? "Phone number" : "Email"} is already registered. Please switch to Login.`,
+      });
+    }
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
 
@@ -137,17 +156,22 @@ export const verifyRegister = async (req, res) => {
 /* ======================== LOGIN REQUEST OTP =========================== */
 export const loginRequestOtp = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, phone } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ message: "Email required" });
+    if (!email && !phone) {
+      return res.status(400).json({ message: "Email or phone number required" });
     }
 
-    const normEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normEmail });
+    let user = null;
+    if (email) {
+      const normEmail = email.toLowerCase().trim();
+      user = await User.findOne({ email: normEmail });
+    } else if (phone) {
+      user = await User.findOne({ phone: phone.trim() });
+    }
 
     if (!user) {
-      return res.status(404).json({ message: "No user found" });
+      return res.status(404).json({ message: "No registered account found with these details." });
     }
 
     if (user.role === "admin") {
@@ -161,6 +185,8 @@ export const loginRequestOtp = async (req, res) => {
     user.setOtp(otp);
     await user.save({ validateBeforeSave: false });
 
+    console.log(`🔑 [OTP] Generated login OTP for ${user.email} (${user.phone}): ${otp}`);
+
     const html = otpEmailHtml({
       name: user.name,
       otp,
@@ -169,20 +195,20 @@ export const loginRequestOtp = async (req, res) => {
       themeAccent,
     });
 
-    // ✅ TEMPORARY: send ONLY to your Resend account email
     await sendEmail({
-      to: user.email, // 👈 PUT IT HERE
+      to: user.email,
       subject: `${siteName} - Login OTP`,
       html,
     });
 
     return res.status(200).json({
       success: true,
-      message: "OTP sent to your email",
+      message: `OTP sent to your email (${user.email})`,
+      ...(process.env.NODE_ENV !== "production" ? { debugOtp: otp } : {}),
     });
   } catch (err) {
     console.error("loginRequestOtp error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
 
@@ -193,14 +219,19 @@ export const loginRequestOtp = async (req, res) => {
 /* ===================================================================== */
 export const loginVerifyOtp = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { email, phone, otp } = req.body;
 
-    if (!email || !otp) {
-      return res.status(400).json({ message: "Email and OTP required" });
+    if ((!email && !phone) || !otp) {
+      return res.status(400).json({ message: "Email or phone, and OTP required" });
     }
 
-    const normEmail = email.toLowerCase().trim();
-    const user = await User.findOne({ email: normEmail });
+    let user = null;
+    if (email) {
+      const normEmail = email.toLowerCase().trim();
+      user = await User.findOne({ email: normEmail });
+    } else if (phone) {
+      user = await User.findOne({ phone: phone.trim() });
+    }
 
     if (!user || !user.verifyOtp(otp)) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
@@ -224,7 +255,7 @@ export const loginVerifyOtp = async (req, res) => {
     });
   } catch (err) {
     console.error("loginVerifyOtp error:", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
 

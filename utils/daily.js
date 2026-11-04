@@ -111,16 +111,47 @@ export async function createMeetingToken({
   isOwner = false,
 }) {
   if (!process.env.DAILY_API_KEY) throw new Error("DAILY_API_KEY missing in environment");
-  if (!process.env.DAILY_DOMAIN_ID) throw new Error("DAILY_DOMAIN_ID missing in environment");
   if (!roomName) throw new Error("roomName required");
 
   const now = Math.floor(Date.now() / 1000);
   const exp = now + Math.max(60, ttlSeconds);
 
+  // 1. Primary: Daily official REST API (server-signed, works regardless of DOMAIN_ID)
+  try {
+    const res = await fetch(`${DAILY_BASE}/meeting-tokens`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        properties: {
+          room_name: roomName,
+          user_name: userName,
+          is_owner: isOwner,
+          exp,
+          enable_screenshare: true,
+        },
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.token) {
+        console.log(`🎫 Token Created via Daily API: ${data.token.substring(0, 40)}...`);
+        return data.token;
+      }
+    } else {
+      const errText = await res.text();
+      console.warn("⚠️ Daily REST API token creation failed, using JWT fallback:", errText);
+    }
+  } catch (apiErr) {
+    console.warn("⚠️ Daily REST API call error, using JWT fallback:", apiErr.message);
+  }
+
+  // 2. Fallback: Self-signed JWT token
   const payload = {
     iss: process.env.DAILY_API_KEY,
     room: roomName,
-    domain: process.env.DAILY_DOMAIN,
+    r: roomName,
+    domain: process.env.DAILY_DOMAIN || "shaadiundo.daily.co",
     user_name: userName,
     is_owner: isOwner,
     exp,
@@ -130,17 +161,17 @@ export async function createMeetingToken({
       canReceive: { base: true },
       canAdmin: isOwner,
     },
-    d: process.env.DAILY_DOMAIN_ID,
+    ...(process.env.DAILY_DOMAIN_ID ? { d: process.env.DAILY_DOMAIN_ID } : {}),
     iat: now,
   };
 
-  console.log("🛠️ Signing meeting token payload:", payload);
+  console.log("🛠️ Signing fallback meeting token payload:", payload);
 
   const token = jwt.sign(payload, process.env.DAILY_API_KEY, {
     algorithm: "HS256",
   });
 
-  console.log(`🎫 Token Created: ${token.substring(0, 40)}...`);
+  console.log(`🎫 Fallback Token Created: ${token.substring(0, 40)}...`);
   return token;
 }
 
