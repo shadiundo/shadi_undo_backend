@@ -5,6 +5,8 @@ import bodyParser from "body-parser";
 import path from "path";
 import http from "http";
 import { Server } from "socket.io";
+import mongoose from "mongoose";
+import Appointment from "./models/Appointment.js";
 
 
 import connectDB from "./config/db.js";
@@ -131,8 +133,20 @@ io.on("connection", (socket) => {
     socket.to(`appointment:${appointmentId}`).emit("user-left", { appointmentId, user });
   });
 
-  socket.on("professional-left", ({ appointmentId }) => {
+  socket.on("professional-left", async ({ appointmentId }) => {
     console.log(`⚠️ Professional left appointment:${appointmentId}`);
+    try {
+      if (appointmentId && mongoose.Types.ObjectId.isValid(appointmentId)) {
+        await Appointment.findByIdAndUpdate(appointmentId, {
+          $set: {
+            "session.pausedAt": new Date(),
+            "session.participants.professionalJoined": false,
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to set pausedAt on professional-left:", e);
+    }
     socket.to(`appointment:${appointmentId}`).emit("professional-left", { appointmentId });
     socket.to(`appointment:${appointmentId}`).emit("notify", {
       type: "PROFESSIONAL_LEFT",
@@ -140,8 +154,25 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("professional-joined", ({ appointmentId }) => {
+  socket.on("professional-joined", async ({ appointmentId }) => {
     console.log(`✅ Professional rejoined appointment:${appointmentId}`);
+    try {
+      if (appointmentId && mongoose.Types.ObjectId.isValid(appointmentId)) {
+        const appt = await Appointment.findById(appointmentId);
+        if (appt && appt.session) {
+          if (appt.session.pausedAt && appt.session.expiresAt) {
+            const pausedMs = Math.max(0, Date.now() - new Date(appt.session.pausedAt).getTime());
+            appt.session.expiresAt = new Date(new Date(appt.session.expiresAt).getTime() + pausedMs);
+          }
+          appt.session.pausedAt = null;
+          appt.session.participants = appt.session.participants || {};
+          appt.session.participants.professionalJoined = true;
+          await appt.save();
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to unpause on professional-joined:", e);
+    }
     socket.to(`appointment:${appointmentId}`).emit("professional-joined", { appointmentId });
     socket.to(`appointment:${appointmentId}`).emit("notify", {
       type: "PROFESSIONAL_JOINED",
@@ -149,11 +180,24 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     console.log("❌ Socket disconnected:", socket.id);
     if (socket.data.role === "professional" && socket.data.appointmentId) {
-      socket.to(`appointment:${socket.data.appointmentId}`).emit("professional-left", {
-        appointmentId: socket.data.appointmentId,
+      const apptId = socket.data.appointmentId;
+      try {
+        if (apptId && mongoose.Types.ObjectId.isValid(apptId)) {
+          await Appointment.findByIdAndUpdate(apptId, {
+            $set: {
+              "session.pausedAt": new Date(),
+              "session.participants.professionalJoined": false,
+            }
+          });
+        }
+      } catch (e) {
+        console.warn("Socket disconnect pause failed:", e);
+      }
+      socket.to(`appointment:${apptId}`).emit("professional-left", {
+        appointmentId: apptId,
       });
     }
   });

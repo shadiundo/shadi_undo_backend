@@ -37,6 +37,7 @@ const sessionSchema = new mongoose.Schema({
     bothJoinedAt: Date
   },
   expiresAt: Date,
+  pausedAt: Date,
   minEndTime: Date,
 });
 

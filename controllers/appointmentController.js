@@ -647,19 +647,26 @@ export async function startRealTimeSession(req, res) {
     const minutes = appointment.durationMinutesRequested || 30;
     const now = new Date();
 
+    let sessionExpiresAt = appointment.session?.expiresAt;
+    if (appointment.session?.pausedAt && sessionExpiresAt) {
+      const pausedMs = Math.max(0, now.getTime() - new Date(appointment.session.pausedAt).getTime());
+      sessionExpiresAt = new Date(new Date(sessionExpiresAt).getTime() + pausedMs);
+    } else if (!sessionExpiresAt || new Date(sessionExpiresAt) <= now) {
+      sessionExpiresAt = new Date(Date.now() + minutes * 60 * 1000);
+    }
+
     appointment.session = {
       ...(appointment.session || {}),
       roomName,
       videoRoom: roomName,
       startedAt: appointment.session?.startedAt || now,
-      expiresAt: (appointment.session?.expiresAt && new Date(appointment.session.expiresAt) > now)
-        ? appointment.session.expiresAt
-        : new Date(Date.now() + minutes * 60 * 1000),
+      expiresAt: sessionExpiresAt,
+      pausedAt: null,
       minEndTime: appointment.session?.minEndTime || new Date(Date.now() + 30 * 60 * 1000),
       status: "ongoing",
-      participants: appointment.session?.participants || {
-        professionalJoined: false,
-        userJoined: false,
+      participants: {
+        ...(appointment.session?.participants || {}),
+        professionalJoined: true,
       },
     };
 
@@ -718,7 +725,9 @@ return res.json({
     token: tokenStr,  // This is the key field
     meetingUrl: `https://${process.env.DAILY_DOMAIN || "shaadiundo.daily.co"}/${roomName}`,
     ttlSeconds: Math.max(60, minutes * 60),
+    session: appointment.session,
   },
+  session: appointment.session,
 });
 
   } catch (err) {
@@ -769,6 +778,7 @@ export const getSessionRoom = async (req, res) => {
       session: {
         startedAt: session.startedAt || null,
         expiresAt: session.expiresAt || null,
+        pausedAt: session.pausedAt || null,
         status: session.status || null,
         participants: session.participants || { professionalJoined: false, userJoined: false },
       },
@@ -910,7 +920,9 @@ export async function joinSession(req, res) {
         token,
         ttlSeconds,
         meetingUrl: `https://${process.env.DAILY_DOMAIN || "shaadiundo.daily.co"}/${roomName}`,
+        session: appointment.session,
       },
+      session: appointment.session,
     });
   } catch (err) {
     console.error("joinSession error:", err);
@@ -959,7 +971,18 @@ export const updateParticipants = async (req, res) => {
       // Ensure participants object exists
       appt.session.participants = appt.session.participants || { professionalJoined: false, userJoined: false };
 
-      if (typeof professionalJoined === "boolean") appt.session.participants.professionalJoined = professionalJoined;
+      if (typeof professionalJoined === "boolean") {
+        appt.session.participants.professionalJoined = professionalJoined;
+        if (!professionalJoined) {
+          appt.session.pausedAt = appt.session.pausedAt || new Date();
+        } else if (appt.session.pausedAt) {
+          const pausedMs = Math.max(0, Date.now() - new Date(appt.session.pausedAt).getTime());
+          if (appt.session.expiresAt) {
+            appt.session.expiresAt = new Date(new Date(appt.session.expiresAt).getTime() + pausedMs);
+          }
+          appt.session.pausedAt = null;
+        }
+      }
       if (typeof userJoined === "boolean") appt.session.participants.userJoined = userJoined;
 
       if (appt.session.participants.professionalJoined && appt.session.participants.userJoined) {
