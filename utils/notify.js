@@ -11,11 +11,11 @@ console.log("RESEND FROM =", process.env.EMAIL_FROM);
 console.log("RESEND KEY =", process.env.RESEND_API_KEY?.slice(0, 8));
 
 
-export const sendEmail = async ({ to, subject, text, html }) => {
+export const sendEmail = async ({ to, email, subject, text, html }) => {
   try {
     const response = await resend.emails.send({
       from: process.env.EMAIL_FROM,
-      to,
+      to: to || email,
       subject,
       text,
       html,

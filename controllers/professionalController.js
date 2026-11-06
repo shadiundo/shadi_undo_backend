@@ -4,7 +4,9 @@ import Professional from "../models/Professional.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import { sendEmail } from "../utils/sendEmail.js";
+import { sendEmail } from "../utils/notify.js";
+import { otpEmailHtml } from "../utils/emailTemplates.js";
+import EmailVerification from "../models/EmailVerification.js";
 
 const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(String(id));
 const safeArray = (v) => (Array.isArray(v) ? v.filter(Boolean) : []);
@@ -151,8 +153,65 @@ function normalizeAvailability(input) {
 }
 
 
-/** Register Professional */
+/** Send Professional Registration OTP */
+export const sendProfessionalRegistrationOtp = async (req, res) => {
+  try {
+    const { email, name } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
 
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Check if email is already registered
+    const exists = await Professional.findOne({ email: normalizedEmail });
+    if (exists) {
+      return res.status(400).json({
+        success: false,
+        message: "This email is already registered. Please login instead.",
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
+
+    // Upsert in EmailVerification collection
+    await EmailVerification.findOneAndUpdate(
+      { email: normalizedEmail },
+      { otpHash, createdAt: new Date() },
+      { upsert: true, new: true }
+    );
+
+    console.log(`🔑 [OTP] Generated Professional Registration OTP for ${normalizedEmail}: ${otp}`);
+
+    const html = otpEmailHtml({
+      name: name || "Professional",
+      otp,
+      siteName: "Shaadi Undo",
+    });
+
+    const emailRes = await sendEmail({
+      to: normalizedEmail,
+      subject: "Shaadi Undo - Verify Your Email for Registration",
+      html,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Verification code sent to ${normalizedEmail}`,
+      ...(process.env.NODE_ENV !== "production" ? { debugOtp: otp } : {}),
+    });
+  } catch (err) {
+    console.error("sendProfessionalRegistrationOtp error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to send verification code",
+    });
+  }
+};
+
+/** Register Professional */
 export const registerProfessional = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -164,6 +223,35 @@ export const registerProfessional = async (req, res) => {
         message: "name, email, password and role are required",
       });
     }
+
+    /* ---------------- EMAIL OTP VERIFICATION ---------------- */
+    const { otp } = req.body;
+    if (!otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Email verification OTP is required. Please verify your email first.",
+      });
+    }
+
+    const normalizedEmailEarly = String(email).trim().toLowerCase();
+    const verificationRecord = await EmailVerification.findOne({ email: normalizedEmailEarly });
+    if (!verificationRecord) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification code expired or not requested. Please request a new OTP.",
+      });
+    }
+
+    const inputOtpHash = crypto.createHash("sha256").update(String(otp).trim()).digest("hex");
+    if (verificationRecord.otpHash !== inputOtpHash) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid verification code. Please check your email and try again.",
+      });
+    }
+
+    // OTP valid: Remove verification record so it cannot be reused
+    await EmailVerification.deleteOne({ _id: verificationRecord._id });
 
     const normalizedEmail = String(email).trim().toLowerCase();
     const exists = await Professional.findOne({ email: normalizedEmail });
@@ -1051,6 +1139,7 @@ export const getAvailableSlots = async (req, res) => {
 };
 
 export default {
+  sendProfessionalRegistrationOtp,
   registerProfessional,
   loginProfessional,
   forgotPassword,

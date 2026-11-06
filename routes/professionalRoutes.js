@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { editProfileUpload, editProfile } from "../controllers/editProfileController.js";
 import { upload } from "../middleware/uploadMiddleware.js";
 import {
+  sendProfessionalRegistrationOtp,
   registerProfessional,
   loginProfessional,
   forgotPassword,
@@ -185,6 +186,7 @@ router.post("/test-email", async (req, res) => {
   }
 });
 
+router.post("/send-registration-otp", sendProfessionalRegistrationOtp);
 router.post("/register", registerProfessional);
 router.post("/login", loginProfessional);
 router.post("/forgot-password", forgotPassword);

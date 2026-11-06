@@ -96,6 +96,16 @@ app.use("/api/reviews", reviewRouter);
 
 app.get("/", (req, res) => res.send("API running"));
 
+// Health check endpoint for monitoring & fast frontend warm-up
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    db: mongoose.connection.readyState === 1 ? "connected" : "connecting/disconnected",
+  });
+});
+
 const server = http.createServer(app);
 
 const io = new Server(server, {
@@ -206,6 +216,19 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
+
+  // Auto keep-alive ping for free-tier deployments (e.g. Render) to prevent idle sleep
+  const PING_URL = process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_URL;
+  if (PING_URL) {
+    const intervalMs = 14 * 60 * 1000; // 14 mins
+    setInterval(() => {
+      fetch(`${PING_URL}/api/health`)
+        .then((r) => r.json())
+        .then((d) => console.log(`[KeepAlive] Ping ok (${d.uptime?.toFixed(0)}s)`))
+        .catch((err) => console.warn("[KeepAlive] Ping failed:", err.message));
+    }, intervalMs);
+    console.log(`[KeepAlive] Auto-ping active for ${PING_URL} (every 14 mins)`);
+  }
 });
 
 
